@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<title>{{ title }}</title>
+
+	<meta charset="utf-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1">	
+	<!-- <link href="/static/css/bootstrap.min.css" type="text/css" rel="stylesheet"> -->
+	<link rel="stylesheet" type="text/css" href="/static/DataTables/datatables.css"/>
+	<link rel="stylesheet" type="text/css" href="/static/DataTables/Bootstrap-3.3.5/css/bootstrap-theme.min.css"/>
+	<link rel="stylesheet" type="text/css" href="/static/font-awesome-4.4.0/css/font-awesome.min.css"/>
+	<style type="text/css">
+	.popover{
+    max-width: 100%; /* Max Width of the popover (depending on the container!) */
+	}
+	</style>	
+</head>
+<body>
+	<div class="container">
+		<div class="page-header">
+			<h1>Appcompat Solver</h1>
+		</div>
+		<form id="form" class="form-horizontal">
+			<div class="form-group">
+				<label for="instance_select" class="col-sm-2 control-label">Select specific instance</label>
+				<div class="col-sm-3">
+					<select id="instance_select" name="instance_select" class="form-control input-sm">
+						<option value="">All</option>
+						{% for instance in instances %}
+						<option value="{{ instance[0] }}">{{ instance[1] }} - {{ instance[2] }}</option>
+						{% endfor %}
+					</select>
+				</div>
+			</div>
+			<div class="checkbox">
+				<label>
+					<input type="checkbox" name="full_scan" id="full_scan"> Perform a full scan (may take an hour)
+				</label>
+			</div>
+			<div class="form-group">
+				<div class="col-sm-2">
+					<button id="reprocess_button" name="instance_select" class="form-control input-sm btn btn-default">Reprocess</button>
+				</div>
+				<div id="loading" class="col-sm-2">
+					Reprocessing...
+				</div>
+			</div>
+		</form>
+		<hr>
+		<table id="dtable" class="table table-striped table-bordered datatable">
+			<thead><tr>
+			{% for col in dt_columns %}
+			<th>{{ col }}</th>
+			{% endfor %}
+			</tr></thead>
+		</table>
+	</div><!-- /container -->
+	<!-- <script type="text/javascript" src="/static/js/jquery-2.1.4.js"></script> -->
+	<script type="text/javascript" src="/static/DataTables/datatables.js"></script>
+	<!-- <script type="text/javascript" src="/static/js/bootstrap.min.js"></script> -->
+
+	<script>
+	$('#form').submit(false);
+	$('#loading').hide()
+
+	// When changing instance, redraw the page
+	$('#instance_select').change(function() {
+		instance_id = $('#instance_select').val()
+		if (instance_id != '') {
+			url = '/api/entries/'+instance_id
+		} else {
+			url = '/api/entries'
+		}
+		
+		$('#dtable').dataTable().api().ajax.url(url)	
+  		$('#dtable').DataTable().draw('page');
+	});
+
+
+	$('#reprocess_button').click(function() {
+		instance_id = $('#instance_select').val();
+		full_scan = $('#full_scan').is(":checked");
+
+		if (instance_id != '') {		
+			url = '/api/reprocess/' + instance_id
+		} else {
+			url = '/api/reprocess'
+		}
+
+		$('#loading').show()
+		$.post(url, {'full_scan':full_scan}).done(function (d) {
+			endpoll = false;
+			// Poll the job queue for results
+			(function poll() {
+				if (endpoll) {
+					return;
+				}
+
+			    setTimeout(function() {
+			        $.ajax({
+			            url: "/api/job_status/"+d.job_id,
+			            type: "GET",
+			            success: function(data) {
+			            	if (data.job_status == 'finished') {
+			            		$('#loading').hide()
+			            		$('#dtable').DataTable().draw('page');
+			            		endpoll = true;
+			            	}
+			            },
+			            dataType: "json",
+			            complete: poll,
+			            timeout: 2000
+			        })
+			    }, 5000);
+			})();
+		});
+	});
+
+	$(document).ready(function() {
+		table = $('#dtable').DataTable({
+			processing: true,
+			serverSide: true,
+			searchDelay: 800,
+			pageLength: 50,
+			columns: [
+				{ 'data': '_id' },
+				{ 'data': '_index' },
+				{ 'data': '_source.class_label' },
+				{ 'data': '_source.hostname' },
+				{ 'data': '_source.predict' },
+				{ 'data': '_source.path' },
+				{ 'data': '_source.last_modified' },
+				{ 'data': '_source.last_execution' },
+				{ 'data': '_source.file_size' },
+				{ 'data': '_source.file_executed' },
+				{ 'data': '_source.f_neighbour_psexec' },
+				{ 'data': '_source.f_shortname_ends_3264' },
+				{ 'data': '_source.f_path_depth' },
+				{ 'data': '_source.f_shortname_length' },
+				{ 'data': '_source.f_staging_directory' },
+				{ 'data': '_source.f_temp_dir' },
+				{ 'data': '_source.f_system32_dir' },
+				{ 'data': '_source.f_recon_cmd' },
+				{ 'data': '_source.f_users_dir' },
+				{ 'data': '_source.f_path_unique_hosts' },
+				{ 'data': '_source.f_number_digits' },
+				{ 'data': '_source.f_root_length' },
+				{ 'data': '_source.f_executable_archive' },
+				{ 'data': '_source.f_recon_cluster' },
+				{ 'data': '_source.f_files_in_folder' },
+				{ 'data': '_source.f_same_timestamp_different_name' },
+				{ 'data': '_source.f_same_filesize_different_name' },
+			],
+			dataSrc: 'data',
+			ajax: {
+				url: "/api/entries",
+			},
+			columnDefs: [
+				{
+					render: function(data, type, full, meta) {
+						return populate_action_buttons(full._index, full._id, full._source.class_label, true);
+					},
+					targets: 0,
+				}
+			]
+		});
+		// Prevent auto searching when you type
+		$('#dtable_filter input').unbind();
+
+		// Require someone to press enter when using search field
+		$('#dtable_filter input').bind('keyup', function(e) {
+  			if(e.keyCode == 13) {
+    			table.search(this.value).draw();	
+  			}
+  		});
+
+		// Update the error handling
+  		$.fn.dataTable.ext.errMode = 'none'; 
+
+  		// Print out error
+		$('#dtable').on('error.dt', function(e, settings, techNote, message) {
+        	console.log(e, settings, techNote, message);
+    	});
+	});
+
+	// Setup the action buttons in dtables
+	function populate_action_buttons(index_name, entry_id, label, with_popover) {
+		not_evil_button_class = 'default';
+		suspicious_button_class = 'default';
+		evil_button_class = 'default';
+		not_evil_button_function = 'update_label';
+		suspicious_button_function = 'update_label';
+		evil_button_function = 'update_label';
+
+		if (label == 'not_evil') {
+			not_evil_button_class = 'success';
+			not_evil_button_function = 'delete_label';
+		} else if (label == 'suspicious') {
+			suspicious_button_class = 'warning';
+			suspicious_button_function = 'delete_label';
+		} else if (label == 'evil') {
+			evil_button_class = 'danger';
+			evil_button_function = 'delete_label';
+		}
+
+		popover = '';
+		if (typeof with_popover !== 'undefined' && with_popover === true) {
+			popover = '<div class="btn-group" role="group">'+
+				'<button type="button" class="btn btn-default btn-xs" data-container="body" data-original-title="Appcompat View" id="popover_'+index_name+'-'+entry_id+'" onclick="setup_popover(\''+index_name+'\',\''+entry_id+'\');">' +
+					'<i class="fa fa-search-plus"></i>' +
+				'</button></div>';
+		}
+
+		return '<div style="white-space: nowrap; width: 100px; ">' +
+			'<div class="btn-group" role="group">' +
+				'<button type="button" class="btn btn-'+not_evil_button_class+' btn-xs" onclick="'+not_evil_button_function+'(\''+index_name+'\',\''+entry_id+'\', \'not_evil\')">' +
+					'<i class="fa fa-thumbs-o-up" style="color: green;"></i>' +
+				'</button>' +
+				'<button type="button" class="btn btn-'+suspicious_button_class+' btn-xs" onclick="'+suspicious_button_function+'(\''+index_name+'\',\''+entry_id+'\', \'suspicious\')">' +
+					'<i class="fa fa-question" style="color: #ffcf00"></i>' +
+				'</button>' +
+				'<button type="button" class="btn btn-'+evil_button_class+' btn-xs" onclick="'+evil_button_function+'(\''+index_name+'\',\''+entry_id+'\', \'evil\')">' +
+					'<i class="fa fa-thumbs-o-down" style="color: red"></i>' +
+				'</button>' +
+			'</div> '+ popover +
+		'</div>';
+	}
+	function update_label(index_name, entry_id, label) {
+		$.post('/api/label/'+index_name+'/'+entry_id, { label: label })
+			.done(function(data) {
+				$('#popover_'+index_name+'-'+entry_id).popover('hide');
+				$('#dtable').DataTable().draw('page');
+			});
+	}
+	function delete_label(index_name, entry_id, label) {
+		$.ajax({
+			url: '/api/label/'+index_name+'/'+entry_id,
+			data: { 'label': label },
+			success: function(data) {
+				$('#popover_'+index_name+'-'+entry_id).popover('hide');
+				$('#dtable').DataTable().draw('page');
+			},
+			method: 'DELETE'});
+	}
+	function setup_popover(index_name, entry_id) {
+		element = $('#popover_'+index_name+'-'+entry_id);
+		popover = $(element).data('bs.popover')
+
+		// See if popover has not been created, setup
+		if (typeof popover === 'undefined') {
+			// Create the popover
+			$(element).popover({
+				placement: 'right',
+				html: true,
+				trigger: 'manual'
+			});
+
+			// Get all entries from the api and populate popover
+			$.getJSON('/api/entry_context/'+index_name+'/'+entry_id).done(function (d) {
+				var popover = $(element).data('bs.popover');
+				h = '<table class="table">' +
+						'<thead>' +
+							'<tr>' +
+							'<td>Last Modified</td>' +
+							'<td>Path</td>' +
+							'<td>Unique Hosts</td>' +
+							'<td>Executed</td>' +
+							'<td>Action</td>' +
+							'</tr>' +
+						'</thead>';
+				$.each(d['data'], function (k,v) {
+					action_buttons = populate_action_buttons(v._index, v._id, v._source.class_label, false);
+					if (v._index == index_name && v._id == entry_id) {
+						row_color = '#dfdfdf';
+					} else if (v._source.f_recon_cmd) {
+						action_buttons = ''
+						row_color = '#e0eeee';
+					} else if (v._source.class_label == 'evil') {
+						row_color = '#ffcccc';
+					} else {
+						row_color = 'inherit';
+					}
+
+					h += '<tr style="background-color: '+row_color+';">' +
+							'<td>'+v._source.last_modified+'</td>' +
+							'<td>'+v._source.path+'</td>' +
+							'<td>'+v._source.f_path_unique_hosts+'</td>' +
+							'<td>'+v._source.file_executed+'</td>' +
+							'<td>'+action_buttons+'</td>' +
+						'</tr>';
+				});
+				h += '</table>';
+				popover.options.content = h;
+				$(element).popover('show');
+			});
+		} else {
+			$(element).popover('toggle');
+		}
+
+		// Hide all popovers curently open
+		$.each($('[id^="popover_"]'), function(k,v) { 
+			// Don't modify the current popover
+			if ($(v)[0].id != $(element)[0].id) {
+				popover = $(v).data('bs.popover')
+				// See if popover has been created
+				if (typeof popover !== 'undefined') {
+					// If popover is visible, hide it
+					if (popover.tip().hasClass('in')) {
+						$(v).popover('hide'); 	
+					}
+				}		
+			}
+		});
+	}
+	</script>
+</body>
+</html>
